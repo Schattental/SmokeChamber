@@ -78,12 +78,15 @@ _device_config = load_config()
 PURPLEAIR_1_JSON_URL = _device_config["purpleair_urls"]["bank1"]
 PURPLEAIR_2_JSON_URL = _device_config["purpleair_urls"]["bank2"]
 
-PURPLEAIR_CACHE_SECONDS = 10  # refresh at most every 10s
+# PurpleAir sensors refresh their reported values every 10 seconds.
+# Match that cadence to avoid redundant HTTP requests.
+PURPLEAIR_CACHE_SECONDS = 10
+PURPLEAIR_MAX_AGE_SECONDS = 60
 
 # independent caches (one per bank)
 _purpleair_cache = {
-    "bank1": {"data": None, "time": 0},
-    "bank2": {"data": None, "time": 0},
+    "bank1": {"data": None, "time": 0, "next_attempt": 0, "stale_warned": False},
+    "bank2": {"data": None, "time": 0, "next_attempt": 0, "stale_warned": False},
 }
 
 # --- PurpleAir enable/disable per bank (temporary dev/testing switch) ---
@@ -177,16 +180,30 @@ def setup_co2_sensor(sensor, name="CO2", retries=3, delay=1):
     return False
 
 
+def _cached_purpleair(bank_name, cache):
+    """Reuse a recent reading, otherwise leave PurpleAir fields missing."""
+    if cache["data"] is not None:
+        if time.monotonic() - cache["time"] <= PURPLEAIR_MAX_AGE_SECONDS:
+            return cache["data"]
+        if not cache["stale_warned"]:
+            logger.warning(
+                "PurpleAir cached reading expired (%s): no fresh value for over %s seconds; "
+                "leaving values blank until communication recovers.",
+                bank_name, PURPLEAIR_MAX_AGE_SECONDS,
+            )
+            cache["stale_warned"] = True
+    return {k: float("nan") for k in PURPLEAIR_FIELDS}
+
+
 def read_purpleair(bank_name: str, url: str):
-    """Read PurpleAir JSON for a given bank with per-bank caching."""
+    """Limit attempts per bank and reuse successful readings for at most 60 seconds."""
     if not PURPLEAIR_ENABLED.get(bank_name, True):
         return {k: float("nan") for k in PURPLEAIR_FIELDS}
 
-    now = time.time()
     cache = _purpleair_cache[bank_name]
 
-    if cache["data"] and (now - cache["time"]) < PURPLEAIR_CACHE_SECONDS:
-        return cache["data"]
+    if time.monotonic() < cache["next_attempt"]:
+        return _cached_purpleair(bank_name, cache)
 
     try:
         resp = requests.get(url, timeout=3)
@@ -223,15 +240,17 @@ def read_purpleair(bank_name: str, url: str):
                 result[k] = fval
 
         cache["data"] = result
-        cache["time"] = now
+        cache["time"] = time.monotonic()
+        cache["stale_warned"] = False
         return result
 
     except Exception as e:
         logger.warning(f"PurpleAir JSON read failed ({bank_name}): {e}")
-        if cache["data"]:
-            return cache["data"]
+    finally:
+        # Wait after failed requests too; do not sleep or hold up gas readings.
+        cache["next_attempt"] = time.monotonic() + PURPLEAIR_CACHE_SECONDS
 
-        return {k: float("nan") for k in PURPLEAIR_FIELDS}
+    return _cached_purpleair(bank_name, cache)
 
 
 def safe_float(value):

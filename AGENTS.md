@@ -69,6 +69,7 @@ documented in the inspected project; do not assume them.
 | `docs/UPDATES.md` | Website updater setup, operating behavior, and recovery. |
 | `tests/test_updater.py` | Temporary-repository update/rollback tests plus mocked route and configuration tests. |
 | `tests/test_collector_watchdog.py` | Mocked initialization, cancellation, progress timeout, single-collector restart, and CSV regression tests. |
+| `tests/test_purpleair.py` | Mocked PurpleAir attempt spacing, cache expiry, recovery, and missing CSV/live readings. |
 
 The stack is Python, Flask, Flask-SocketIO, gevent, Jinja, plain browser JS/CSS,
 and Chart.js. There is no frontend build step or database. Repository preparation
@@ -103,10 +104,13 @@ Default PurpleAir local JSON URLs in `device_config.py`, used by `collector.py`:
 Both are enabled by default. This Pi's URLs, enable flags, and CO₂ serial paths
 are preserved in ignored `config.local.json`. `collector.py` reads these via
 `device_config.load_config()`; a tracked example documents the format.
-Successful results are cached per bank
-for 10 seconds; HTTP timeout is 3 seconds. Failed requests reuse the last cached
-reading if available, without a freshness marker in the emitted data. A faster
-collection interval does not imply fresh PurpleAir measurements each row.
+PurpleAir requests wait at least 10 seconds after each completed attempt per bank,
+including failures; HTTP timeout is 3 seconds. Successful readings may be reused
+for up to 60 seconds after receipt. Older readings become blank CSV cells and
+JSON nulls, with one expiry warning per outage; attempts continue on the same
+10-second schedule and successful responses restore readings automatically.
+Elapsed times use a monotonic clock. A faster collection interval does not imply
+fresh PurpleAir measurements each row.
 
 PurpleAir supplies A/B channels for PM1.0, PM2.5, PM10 (`µg/m³`) and particle
 counts at ≥0.3/0.5/1.0/2.5/5.0/10 µm (`particles/dL`, as labeled in this code).
