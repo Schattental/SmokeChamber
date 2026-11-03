@@ -8,6 +8,7 @@ import shutil
 
 from lib import DFRobot_MultiGasSensor as dfg
 from lib.MHZ16_CO2 import MHZ16_CO2
+from device_config import load_config
 
 import math
 
@@ -42,8 +43,9 @@ history = [] # last 100 points kept here
 # -------------------------
 
 # --- PurpleAir endpoints (one per bank) ---
-PURPLEAIR_1_JSON_URL = "http://192.168.0.104/json?live=true"
-PURPLEAIR_2_JSON_URL = "http://192.168.0.109/json?live=true"
+_device_config = load_config()
+PURPLEAIR_1_JSON_URL = _device_config["purpleair_urls"]["bank1"]
+PURPLEAIR_2_JSON_URL = _device_config["purpleair_urls"]["bank2"]
 
 PURPLEAIR_CACHE_SECONDS = 10  # refresh at most every 10s
 
@@ -54,10 +56,7 @@ _purpleair_cache = {
 }
 
 # --- PurpleAir enable/disable per bank (temporary dev/testing switch) ---
-PURPLEAIR_ENABLED = {
-    "bank1": True,
-    "bank2": True,
-}
+PURPLEAIR_ENABLED = _device_config["purpleair_enabled"]
 
 # All PurpleAir-derived fields UI/CSV expects
 PURPLEAIR_FIELDS = [
@@ -77,9 +76,9 @@ I2C_1 = 0x01
 # Set gas sensor address
 
 # --- CO2 (MH-Z16) UART ports ---
-CO2_UART_PORT_1 = "/dev/ttyAMA0"    # Pi 5 onboard pins, Bank 1
+CO2_UART_PORT_1 = _device_config["co2_uart_ports"]["bank1"]
 # DON'T USE /dev/ttyUSB0 for the USB one -> IT CAN CHANGE 
-CO2_UART_PORT_2 = "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0"    # USB to TTL adapter pins, Bank 2
+CO2_UART_PORT_2 = _device_config["co2_uart_ports"]["bank2"]
 
 co2_sensor_1 = MHZ16_CO2(port=CO2_UART_PORT_1, baudrate=9600)
 co2_sensor_2 = MHZ16_CO2(port=CO2_UART_PORT_2, baudrate=9600)

@@ -270,6 +270,19 @@ body:not(.dark-mode) .status.stopped {
     color: #7CFC00;
 }
 
+.update-status {
+    font-size: 12px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+    color: inherit;
+    margin: 6px 0 12px;
+}
+
+.update-status:empty { display: none; }
+.update-error { color: #d43d45; }
+.dark-mode .update-error { color: #ff8990; }
+.sidebar-content button:disabled { opacity: 0.6; cursor: wait; }
+
 .dip-guide {
     margin-top: 20px;
     padding: 12px;

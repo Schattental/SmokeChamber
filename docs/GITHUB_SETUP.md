@@ -1,7 +1,8 @@
 # GitHub upload and read-only Pi connection
 
-This phase prepares and uploads the code, then verifies that the Pi can fetch
-it. It does not implement a website updater or change the running service.
+This guide covers source upload and read-only device access. The public repository
+is <https://github.com/Schattental/SmokeChamber>, with `main` as its default branch.
+See [website updates](UPDATES.md) for the dashboard update button and service setup.
 
 ## 1. Choose the destination
 
@@ -120,19 +121,13 @@ Do not test permissions by attempting an upload. The local SSH command applies
 to pushes too; ongoing development uploads should use the maintainer connection
 or a separate development checkout.
 
-## 4. Later website updater
+## 4. Website updater
 
-The source and device connection will be in place after the initial push and a
-successful fetch. For the later updater, plan a controlled deployment with:
-
-- A chosen release/branch and explicit version reporting.
-- Updates blocked while the chamber is collecting.
-- Device configuration and experimental data preserved independently of code.
-- A staged install/validation and rollback to the previous working version.
-- A service restart only after installation succeeds.
-
-No update endpoint, extra sudo permissions, cron job, or automatic pull is added
-in this phase.
+The website's **Update from GitHub** button fetches the public `main` branch
+without credentials and uses a separate systemd service to install updates and
+recover from failed startup. See [UPDATES.md](UPDATES.md) for installation,
+collection checks, local configuration, and recovery. No periodic update job is
+installed; an operator starts updates explicitly from the website.
 
 References: [GitHub's local code upload guide](https://docs.github.com/en/migrations/importing-source-code/using-the-command-line-to-import-source-code/adding-locally-hosted-code-to-github?platform=linux)
 and [deploy key guide](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing-deploy-keys).

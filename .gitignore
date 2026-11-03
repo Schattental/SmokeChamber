@@ -29,6 +29,7 @@ dist/
 .env.*
 !.env.example
 config.local.*
+!config.local.example.json
 /local/
 /.ssh/
 *.pem

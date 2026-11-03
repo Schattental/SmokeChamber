@@ -10,7 +10,8 @@ writes timestamped CSV sessions, and displays live charts in a browser.
 - Runtime hardware drivers in `lib/` and standalone hardware examples in `dfrobot/`.
 - Dashboard template, CSS, Chart.js, and other static assets.
 - Pinned direct Python dependencies and a reference systemd service.
-- [Agent context](AGENTS.md) and [GitHub setup instructions](docs/GITHUB_SETUP.md).
+- [Agent context](AGENTS.md), [GitHub setup](docs/GITHUB_SETUP.md), and
+  [website update instructions](docs/UPDATES.md).
 
 Experiment CSVs, logs, virtual environments, private keys, and local settings
 are excluded from Git. The `data/` and `logs/` directories are kept through
@@ -36,10 +37,11 @@ Each bank has O₂, NO₂, SO₂, O₃, and CO on I²C bus 1, an MH-Z16 CO₂ se
 UART, and a PurpleAir local HTTP JSON feed. Exact addresses, serial paths,
 units, timing, and data formats are documented in [AGENTS.md](AGENTS.md).
 
-Current deployment values are hardcoded in `collector.py`, including the
-PurpleAir private-LAN addresses and UART paths. They are included in this source
-snapshot and are not passwords or API credentials. Adapt these values and the
-service paths before installing on different hardware. External Socket.IO CDN
+Device-local PurpleAir addresses, enable flags, and CO₂ UART paths are loaded
+from ignored `config.local.json`, with defaults in `device_config.py`. Copy
+`config.local.example.json` and adapt it before installing on different hardware.
+The default private-LAN addresses and serial paths in the source are not passwords
+or API credentials. Adapt the service paths for other deployments. External Socket.IO CDN
 JavaScript and Google Fonts are currently used by the dashboard.
 
 ## Installing on a separate Pi
@@ -80,8 +82,14 @@ two app instances against the same sensors.
 
 ## Development and validation
 
-Use the syntax-check command in [AGENTS.md](AGENTS.md) without importing the
-application. There is no automated hardware-independent test suite. Files in
+Run the updater/configuration/route tests without real sensor access:
+
+```sh
+./env/bin/python -m unittest discover -s tests -v
+```
+
+These tests use temporary Git repositories and mocked hardware/service controls.
+Use the syntax-check command in [AGENTS.md](AGENTS.md) for other Python changes. Files in
 `dfrobot/`, including `test_co2.py`, communicate with devices and must not be
 treated as safe test discovery targets.
 
@@ -96,10 +104,12 @@ read-only device connection. Public repositories can be read through HTTPS
 without a key; private repositories can use a repository-specific read-only
 deploy key kept outside this folder.
 
-A website-based updater is a later phase and is not implemented here. Its design
-will need to preserve recordings and device configuration, prevent updates during
-collection, and support rollback. Do not use `git reset --hard` or `git clean`
-as a device update procedure.
+The left-hand menu includes **Update from GitHub**, directly below **Show Live
+Log**. It checks public `main`, preserves recordings and local configuration,
+blocks updates during collection, and restores the previous code if the updated
+website fails its startup check. Updates that change dependencies or service
+setup need maintainer assistance. See [the update guide](docs/UPDATES.md) for
+one-time service installation, usage, and recovery.
 
 ## Licensing
 

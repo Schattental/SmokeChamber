@@ -1,0 +1,11 @@
+{
+  "purpleair_urls": {
+    "bank1": "http://192.168.0.104/json?live=true",
+    "bank2": "http://192.168.0.109/json?live=true"
+  },
+  "purpleair_enabled": {"bank1": true, "bank2": true},
+  "co2_uart_ports": {
+    "bank1": "/dev/ttyAMA0",
+    "bank2": "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0"
+  }
+}

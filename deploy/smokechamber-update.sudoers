@@ -1,0 +1,3 @@
+# Fixed service commands only. Install as root, mode 0440, after visudo validation.
+smoke ALL=(root) NOPASSWD: /bin/systemctl start --no-block smokechamber-update.service
+smoke ALL=(root) NOPASSWD: /bin/systemctl stop smokechamber.service, /bin/systemctl start smokechamber.service

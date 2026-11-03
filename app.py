@@ -6,17 +6,20 @@ import subprocess
 import threading
 import logging
 from logging.handlers import RotatingFileHandler
-from flask import Flask, render_template, jsonify, send_file, request
+from flask import Flask, render_template, jsonify, send_file, request, g
 from flask_socketio import SocketIO
 import zipfile
 import io
 from datetime import datetime, timedelta
 from collections import deque
 import time
+import secrets
+from urllib.parse import urlsplit
 
 import collector
 
 from lib.auto_address import change_sensor_address
+from updater import Updater, UpdateError
 
 
 app = Flask(__name__)
@@ -44,6 +47,41 @@ collector.logger = app.logger
 # STATE
 # -------------------------
 current_csv = None
+updater = Updater()
+update_token = secrets.token_urlsafe(32)
+collection_tasks = []
+maintenance_until = 0
+
+
+def collection_busy():
+    """A stopped flag alone does not prove the last sensor read has finished."""
+    collection_tasks[:] = [task for task in collection_tasks if not task.ready()]
+    return collector.is_running() or bool(collection_tasks)
+
+
+def launch_collector():
+    collection_tasks.append(socketio.start_background_task(collector.start_collecting))
+
+
+@app.before_request
+def protect_chamber_operations():
+    if request.method == "POST" and request.path in {
+            "/start", "/restart", "/reboot", "/change_sensor_group", "/set_interval"}:
+        if time.monotonic() < maintenance_until:
+            return jsonify(status="blocked", message="The chamber is restarting."), 409
+        operation = updater.operation()
+        try:
+            operation.__enter__()
+        except UpdateError as exc:
+            return jsonify(status="blocked", message=str(exc)), exc.status_code
+        g.chamber_operation = operation
+
+
+@app.teardown_request
+def release_chamber_operation(_error):
+    operation = g.pop("chamber_operation", None)
+    if operation is not None:
+        operation.__exit__(None, None, None)
 
 # -------------------------
 # WATCHDOG CONFIG
@@ -59,13 +97,39 @@ _watchdog_restart_times = deque()
 # -------------------------
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", update_token=update_token)
+
+
+@app.route("/update/status")
+def update_status():
+    response = jsonify(updater.status())
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/update", methods=["POST"])
+def update_from_github():
+    # Require a token from this website, rather than accepting cross-site forms.
+    origin = request.headers.get("Origin")
+    if (not request.is_json
+            or not secrets.compare_digest(request.headers.get("X-Chamber-Update", ""), update_token)
+            or (origin and urlsplit(origin).netloc != request.host)):
+        return jsonify(status="blocked", message="Reload the chamber website and try again."), 403
+    if time.monotonic() < maintenance_until:
+        return jsonify(status="blocked", message="The chamber is restarting."), 409
+    try:
+        state = updater.request(collection_busy)
+        app.logger.info("GitHub update requested: %s", state.get("request_id"))
+        return jsonify(state), 202
+    except UpdateError as exc:
+        app.logger.warning("GitHub update blocked: %s", exc)
+        return jsonify(status="blocked", message=str(exc)), exc.status_code
 
 @app.route("/start", methods=["POST"])
 def start_collection():
     """Start a new data collection session."""
     global current_csv
-    if collector.is_running():
+    if collection_busy():
         return jsonify({"status": "already_running"})
 
     timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -80,7 +144,7 @@ def start_collection():
     collector.set_csv_file(current_csv)
     collector.set_collecting_flag(True)
     socketio.emit("status_update", {"running": True})
-    socketio.start_background_task(collector.start_collecting)
+    launch_collector()
 
     app.logger.info(f"Started collection: {current_csv}")
     return jsonify({"status": "started"})
@@ -101,7 +165,9 @@ def stop_collection():
 def status():
     """Report running state for the UI indicator."""
     return jsonify({"running": collector.is_running(),
-                    "interval": getattr(collector, "sampling_interval", 1.0)
+                    "interval": getattr(collector, "sampling_interval", 1.0),
+                    "collector_active": collection_busy(),
+                    "version": updater.version,
                     })
 
 @app.route("/set_interval", methods=["POST"])
@@ -199,10 +265,13 @@ def zip_data():
 def restart_service():
     """Restart the smokechamber systemd service safely under gevent."""
      # Extra safeguard: block restart while data collection is active
-    if collector.is_running():
+    global maintenance_until
+    if collection_busy():
         app.logger.warning("Restart blocked because data collection is running.")
         return jsonify({"status": "blocked", "reason": "collection_running"}), 409
     
+    maintenance_until = time.monotonic() + 15
+
     def do_restart():
         # let this HTTP response complete before we kill the process
         time.sleep(1.0)
@@ -218,9 +287,12 @@ def restart_service():
 def reboot_pi():
     """Safely reboot the Raspberry Pi."""
     # Protect against rebooting during collection
-    if collector.is_running():
+    global maintenance_until
+    if collection_busy():
         app.logger.warning("Reboot blocked because data collection is running.")
         return jsonify({"status": "blocked", "reason": "collection_running"}), 409
+
+    maintenance_until = time.monotonic() + 15
 
     def do_reboot():
         import subprocess, time
@@ -382,7 +454,7 @@ def watchdog():
                     # Now safely restart
                     collector.set_collecting_flag(True)
                     socketio.emit("status_update", {"running": True})
-                    socketio.start_background_task(collector.start_collecting)
+                    launch_collector()
                     app.logger.info("Collector restarted by watchdog.")
             else:
                 # not collecting, skip

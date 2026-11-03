@@ -24,6 +24,8 @@
 				<button id="rebootBtn" data-tooltip="Reboot the Raspberry Pi fully.">Reboot</button>
 				<button id="restartBtn" data-tooltip="Restart the smoke chamber service (no full reboot).">Restart Service</button>
 				<button id="logToggleBtn" onclick="toggleLogPanel()" data-tooltip="Toggle log panel. Logs are always recorded. This panel is just visual.">Show Live Log</button>
+				<button id="updateGithubBtn" data-update-token="{{ update_token }}" data-tooltip="Install the latest chamber software. Collection must be stopped.">Update from GitHub</button>
+				<p id="updateGithubStatus" class="update-status" role="status" aria-live="polite"></p>
 
 				<hr class="menu-separator">
 
@@ -121,6 +123,7 @@
 	<div id="logViewer"></div>
 	</div>
 
+    <script src="{{ url_for('static', filename='updater.js') }}" defer></script>
     <script>
 		// METADATA
 		// METADATA: defines how each sensor is displayed (label, unit, color)

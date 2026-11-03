@@ -60,6 +60,14 @@ documented in the inspected project; do not assume them.
 | `deploy/smokechamber.service` | Reference copy of the installed service; not applied automatically. |
 | `docs/GITHUB_SETUP.md` | Initial upload and public HTTPS/private read-only deploy key setup. |
 | `.gitignore` | Excludes measurements, logs, environments, credentials, and local files. |
+| `updater.py` | Hardware-independent update controller/worker; fixed public GitHub main, validation, source backup, restart, rollback. |
+| `device_config.py` | Loads device-local PurpleAir/UART settings from ignored `config.local.json`. |
+| `config.local.example.json` | Tracked configuration template; do not put device overrides in tracked files. |
+| `static/updater.js` | Sidebar button and update progress/reconnect behavior. |
+| `deploy/smokechamber-update.service` | Independent oneshot updater, run as smoke. |
+| `deploy/smokechamber-update.sudoers` | Narrow permissions to start the updater and stop/start the app. |
+| `docs/UPDATES.md` | Website updater setup, operating behavior, and recovery. |
+| `tests/test_updater.py` | Temporary-repository update/rollback tests plus mocked route and configuration tests. |
 
 The stack is Python, Flask, Flask-SocketIO, gevent, Jinja, plain browser JS/CSS,
 and Chart.js. There is no frontend build step or database. Repository preparation
@@ -86,12 +94,15 @@ Each bank also has an MH-Z16 CO₂ sensor at 9600 baud, 8N1:
 - Bank 2: `/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0`.
   Preserve the stable by-id path rather than substituting `/dev/ttyUSB0`.
 
-PurpleAir local JSON URLs in `collector.py`:
+Default PurpleAir local JSON URLs in `device_config.py`, used by `collector.py`:
 
 - Bank 1: `http://192.168.0.104/json?live=true`.
 - Bank 2: `http://192.168.0.109/json?live=true`.
 
-Both are enabled by `PURPLEAIR_ENABLED`. Successful results are cached per bank
+Both are enabled by default. This Pi's URLs, enable flags, and CO₂ serial paths
+are preserved in ignored `config.local.json`. `collector.py` reads these via
+`device_config.load_config()`; a tracked example documents the format.
+Successful results are cached per bank
 for 10 seconds; HTTP timeout is 3 seconds. Failed requests reuse the last cached
 reading if available, without a freshness marker in the emitted data. A faster
 collection interval does not imply fresh PurpleAir measurements each row.
@@ -167,6 +178,8 @@ affect recorded values; do not silently change scaling, offsets, or calibration.
 | `GET /log` | Latest 100 application log lines. |
 | `POST /change_sensor_group` | JSON `{"sensor":"o2","bank":"bank1"}`; hardware readdressing. |
 | `POST /restart`, `POST /reboot` | Schedule service restart/Pi reboot; return 409 while collecting. |
+| `GET /update/status` | Persistent update progress, busy flag, and running version. |
+| `POST /update` | JSON plus page token in `X-Chamber-Update`; queues the independent updater. |
 
 The app binds `0.0.0.0:5000`. No route authentication is implemented and
 Socket.IO permits all origins. Treat the existing deployment as a local
@@ -205,9 +218,9 @@ allows two collector restarts within ten minutes, then disables collection on
 the next qualifying hang. Its shared stop/start flag does not prove an old
 blocked task exited; preserve single-collector behavior when changing it.
 
-Runtime state was **not verified** during document creation: systemd bus access
-was denied in the agent environment and the localhost HTTP check could not
-connect. These limitations do not establish that the Pi service is stopped.
+Sandboxed shell commands may not reach the host systemd bus or localhost
+website. Use permitted host access for live service checks; a sandbox-only
+connection failure does not establish that the Pi service is stopped.
 
 ## Source control and GitHub
 
@@ -222,8 +235,22 @@ The initial upload requires maintainer write access. Device fetches can use
 unauthenticated HTTPS for public repositories, or a dedicated repository-scoped
 read-only deploy key for private repositories. Keep private keys in the user's
 `.ssh` directory outside this repository, and do not grant device write access.
-The website updater is deferred; do not add automatic pulls or deployment actions
-unless that work is requested. The original application code is licensed under
+Website updates are explicitly triggered by the operator. `updater.py` fetches
+the fixed public `Schattental/SmokeChamber` main branch without credentials,
+rejects dirty/diverged source or dependency/service-definition changes, archives
+the previous code, and checks the restarted website's version. It rolls back
+with `git reset --keep` on failed startup. A separate oneshot service survives
+app restarts. Never replace this with an in-process pull/restart task.
+
+The shared file lock and queued state block conflicting controls. Collection
+must have both its flag cleared and all background sensor tasks finished before
+an update or service restart. The updater rechecks this before stopping the app.
+Its state/backups live under ignored `.updates/`; device settings stay in
+ignored `config.local.json`. See `docs/UPDATES.md` for bootstrap service setup.
+Maintainer credentials may be retained during explicitly authorized development
+sessions, separately from credential-free website fetches.
+
+The original application code is licensed under
 PolyForm Noncommercial 1.0.0; see `LICENSE` and the required attribution in
 `NOTICE`. Describe it as source-available with noncommercial restrictions.
 Preserve third-party licenses and copyright notices recorded in
@@ -231,8 +258,10 @@ Preserve third-party licenses and copyright notices recorded in
 
 ## Validation and future maintenance
 
-No automated test suite or test configuration was found. Files under `dfrobot/`
-are hardware scripts, not a safe unit-test suite. In particular, `test_co2.py`
+Run `./env/bin/python -m unittest discover -s tests -v` for updater, configuration,
+and route tests. They use disposable Git repositories and mock hardware/service
+access. Files under `dfrobot/` are hardware scripts, not a safe unit-test suite.
+In particular, `test_co2.py`
 opens the USB UART and writes bytes at module scope; do not run indiscriminate
 test discovery over it.
 
@@ -242,7 +271,7 @@ For Python syntax validation without importing the app or touching devices:
 python3 - <<'PY'
 import ast
 from pathlib import Path
-paths = [Path('app.py'), Path('collector.py'), *Path('lib').glob('*.py')]
+paths = [*Path('.').glob('*.py'), *Path('lib').glob('*.py')]
 for path in paths:
     ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
 print(f'Parsed {len(paths)} Python source files')

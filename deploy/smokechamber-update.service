@@ -1,0 +1,13 @@
+[Unit]
+Description=Update Smoke Chamber from public GitHub main
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=smoke
+WorkingDirectory=/home/smoke/smokechamber
+ExecStart=/home/smoke/smokechamber/env/bin/python /home/smoke/smokechamber/updater.py
+TimeoutStartSec=10min
+StandardOutput=journal
+StandardError=journal
