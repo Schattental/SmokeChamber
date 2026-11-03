@@ -52,6 +52,7 @@ updater = Updater()
 update_token = secrets.token_urlsafe(32)
 collection_tasks = []
 maintenance_until = 0
+collection_stop_requested = threading.Event()
 
 
 def collection_busy():
@@ -61,7 +62,36 @@ def collection_busy():
 
 
 def launch_collector():
+    if any(not task.ready() for task in collection_tasks):
+        raise RuntimeError("The previous collector task has not exited.")
     collection_tasks.append(socketio.start_background_task(collector.start_collecting))
+
+
+def restart_collector_safely():
+    global maintenance_until
+    # Reserve recovery without making the update UI report an update in progress.
+    with updater.operation():
+        if not collector.is_running():
+            return False
+        maintenance_until = float("inf")
+        collector.set_collecting_flag(False)
+    try:
+        socketio.emit("status_update", {"running": False})
+        deadline = time.monotonic() + max(5, collector.sampling_interval)
+        while collection_busy() and time.monotonic() < deadline:
+            socketio.sleep(0.1)
+        if collection_busy():
+            app.logger.error("Watchdog: previous collector has not exited; leaving collection stopped. No replacement started.")
+            return False
+        if collection_stop_requested.is_set():
+            return False
+        with updater.operation():
+            collector.set_collecting_flag(True)
+            launch_collector()
+            socketio.emit("status_update", {"running": True})
+        return True
+    finally:
+        maintenance_until = 0
 
 
 @app.before_request
@@ -133,6 +163,7 @@ def start_collection():
     if collection_busy():
         return jsonify({"status": "already_running"})
 
+    collection_stop_requested.clear()
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     current_csv = "data/" + f"data_{timestamp}.csv"
     with open(current_csv, "w") as f:
@@ -153,6 +184,7 @@ def start_collection():
 @app.route("/stop", methods=["POST"])
 def stop_collection():
     """Stop collection safely."""
+    collection_stop_requested.set()
     if collector.is_running():
         collector.set_collecting_flag(False)
         socketio.emit("status_update", {"running": False})
@@ -414,9 +446,8 @@ def watchdog():
         socketio.sleep(max(10, collector.sampling_interval))
         try:
             if collector.is_running():
-                # allow 5x the sampling interval as grace
-                timeout = max(30, collector.sampling_interval * 5)
-                if collector.seconds_since_last_emit() > timeout:
+                reason = collector.watchdog_timeout_reason()
+                if reason:
                     now = time.time()
 
                     # Drop old restart timestamps outside the window
@@ -442,22 +473,11 @@ def watchdog():
                         # Option 2 (stricter): break the watchdog loop entirely
                         # break
 
-                    # Record this restart
-                    _watchdog_restart_times.append(now)
-
-                    app.logger.warning("Collector appears hung — restarting.")
-                    socketio.emit("log_update", {"line": "Collector hung, restarting thread.\n"})
-
-                    # Gracefully stop the current collector
-                    collector.set_collecting_flag(False)
-                    socketio.emit("status_update", {"running": False})
-                    socketio.sleep(max(5, collector.sampling_interval))  # short yield for it to exit
-
-                    # Now safely restart
-                    collector.set_collecting_flag(True)
-                    socketio.emit("status_update", {"running": True})
-                    launch_collector()
-                    app.logger.info("Collector restarted by watchdog.")
+                    app.logger.warning("Collector watchdog: %s — stopping collector.", reason)
+                    socketio.emit("log_update", {"line": f"Collector watchdog: {reason}.\n"})
+                    if restart_collector_safely():
+                        _watchdog_restart_times.append(now)
+                        app.logger.info("Collector restarted by watchdog after the previous task exited.")
             else:
                 # not collecting, skip
                 continue

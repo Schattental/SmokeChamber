@@ -34,6 +34,37 @@ current_csv = None    # Active CSV file name
 lock = threading.Lock()
 last_emit_time = 0  # UNIX timestamp of last successful data emit
 sampling_interval = load_sampling_interval()
+starting = False  # Includes initialization and the first sample.
+startup_started = 0
+last_progress_time = 0
+STARTUP_TIMEOUT_SECONDS = 180
+
+
+class CollectionStopped(Exception):
+    """Cooperative cancellation between initialization steps."""
+
+
+def check_collecting():
+    if not is_running():
+        raise CollectionStopped()
+
+
+def mark_progress():
+    global last_progress_time
+    with lock:
+        last_progress_time = time.monotonic()
+
+
+def watchdog_timeout_reason():
+    with lock:
+        if not collecting:
+            return None
+        now = time.monotonic()
+        if starting and now - startup_started > STARTUP_TIMEOUT_SECONDS:
+            return f"startup exceeded its {STARTUP_TIMEOUT_SECONDS}-second limit"
+        if now - last_progress_time > max(30, sampling_interval * 5):
+            return "no sensor initialization progress" if starting else "no collection progress"
+    return None
 
 # history: list of dicts {"time": ..., "sensors": {...}}
 history = [] # last 100 points kept here
@@ -98,15 +129,23 @@ gas_co_2 = dfg.DFRobot_MultiGasSensor_I2C(I2C_1 ,0x64)
 def setup_sensor(gas, name, retries=2, delay=1):
     """Attempt to initialize a gas sensor with retry logic."""
     for attempt in range(retries):
+        check_collecting()
         try:
             if not gas.change_acquire_mode(gas.PASSIVITY):
                 raise RuntimeError("Mode change failed")
             time.sleep(delay)
+            check_collecting()
             gas.set_temp_compensation(gas.ON)
+            check_collecting()
+            mark_progress()
             logger.info(f"{name} sensor initialized (attempt {attempt + 1})")
             return True
+        except CollectionStopped:
+            raise
         except Exception as e:
+            mark_progress()
             logger.warning(f"{name} sensor setup failed (attempt {attempt + 1}/{retries}): {e}")
+            check_collecting()
             time.sleep(delay)
     logger.error(f"{name} sensor failed to initialize after {retries} attempts.")
     return False
@@ -117,14 +156,21 @@ def setup_co2_sensor(sensor, name="CO2", retries=3, delay=1):
         return False
 
     for attempt in range(retries):
+        check_collecting()
         try:
             val = sensor.read_co2()
+            check_collecting()
             if val is None:
                 raise RuntimeError("CO2 read returned None")
+            mark_progress()
             logger.info(f"{name} initialized (attempt {attempt+1}), first read: {val} ppm")
             return True
+        except CollectionStopped:
+            raise
         except Exception as e:
+            mark_progress()
             logger.warning(f"{name} setup failed (attempt {attempt+1}/{retries}): {e}")
+            check_collecting()
             time.sleep(delay)
 
     logger.error(f"{name} failed to initialize after retries.")
@@ -353,8 +399,11 @@ def set_sampling_interval(seconds: float):
 # -------------------------
 def set_collecting_flag(flag: bool):
     """Set start/stop flag from Flask."""
-    global collecting
+    global collecting, starting, startup_started, last_progress_time
     with lock:
+        if flag and not collecting:
+            starting = True
+            startup_started = last_progress_time = time.monotonic()
         collecting = flag
 
 def set_csv_file(filename: str):
@@ -378,8 +427,9 @@ def get_history():
 # -------------------------
 def start_collecting():
     """Continuously read data and append to memory + CSV file."""
-    global collecting
+    global collecting, starting
     try:
+        check_collecting()
         global current_csv, history
         
         # Reset timestamp of successful emit
@@ -411,7 +461,9 @@ def start_collecting():
                 logger.warning(f"{name} failed init, continuing with partial data.")
 
 
-        logger.info("Gas sensors initialized.")
+        check_collecting()
+        logger.info("Sensor initialization complete: %s/%s sensors available.",
+                    sum(gas_status.values()), len(gas_status))
 
         # --- Log available storage before starting ---
         free_gb, total_gb, used_percent = get_storage_info("/")
@@ -440,6 +492,7 @@ def start_collecting():
                     purpleair_data = read_purpleair(bank_name, pa_url)
                 else:
                     purpleair_data = {k: float("nan") for k in PURPLEAIR_FIELDS}
+                mark_progress()
 
                 bank_values = {}
                 for name, info in bank_sensors.items():
@@ -453,6 +506,7 @@ def start_collecting():
                     except Exception as e:
                         bank_values[name] = None
                         logger.exception(f"{bank_name}:{name} read failed: {e}")
+                    mark_progress()
 
                 banks_payload[bank_name] = bank_values
 
@@ -499,14 +553,20 @@ def start_collecting():
                 last_emit_time = time.time()
 
 
+            mark_progress()
             # collection interval (not exact because of other delays and overhead)
             with lock:
+                starting = False
                 interval = sampling_interval
             if socketio:
                 socketio.sleep(interval)
             else:
                 time.sleep(interval)
+    except CollectionStopped:
+        logger.info("Collection stopped during sensor initialization.")
     except Exception:
         logger.exception("Collector crashed")
+    finally:
         with lock:
-            collecting = False   
+            collecting = False
+            starting = False

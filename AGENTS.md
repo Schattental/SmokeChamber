@@ -68,6 +68,7 @@ documented in the inspected project; do not assume them.
 | `deploy/smokechamber-update.sudoers` | Narrow permissions to start the updater and stop/start the app. |
 | `docs/UPDATES.md` | Website updater setup, operating behavior, and recovery. |
 | `tests/test_updater.py` | Temporary-repository update/rollback tests plus mocked route and configuration tests. |
+| `tests/test_collector_watchdog.py` | Mocked initialization, cancellation, progress timeout, single-collector restart, and CSV regression tests. |
 
 The stack is Python, Flask, Flask-SocketIO, gevent, Jinja, plain browser JS/CSS,
 and Chart.js. There is no frontend build step or database. Repository preparation
@@ -213,10 +214,13 @@ cd /home/smoke/smokechamber
 Use the project working directory: data, log, and export paths are relative.
 The main entry point applies gevent monkey patching and starts the watchdog;
 using `flask run` or another import-only launcher does not reproduce that setup.
-The watchdog checks for missing emissions after `max(30, interval * 5)` seconds,
-allows two collector restarts within ten minutes, then disables collection on
-the next qualifying hang. Its shared stop/start flag does not prove an old
-blocked task exited; preserve single-collector behavior when changing it.
+The watchdog checks for missing initialization/read progress after
+`max(30, interval * 5)` seconds and separately limits startup (through the first
+sample) to 180 seconds. Initialization honors Stop between attempts and sensors.
+The watchdog allows two restarts within ten minutes, but only starts a replacement
+after the previous task has exited. If it cannot stop within `max(5, interval)`
+seconds, collection stays stopped and the fault is logged. A manual Stop during
+recovery cancels the pending restart. Preserve this single-collector behavior.
 
 Sandboxed shell commands may not reach the host systemd bus or localhost
 website. Use permitted host access for live service checks; a sandbox-only
