@@ -1,7 +1,9 @@
 # Third-party notices
 
-This file records notices for bundled third-party source and assets. It does
-not assign a license to the original Smoke Chamber application code. Python
+This file records notices for bundled third-party source and assets. The original
+Smoke Chamber application code is covered by the PolyForm Noncommercial License
+1.0.0 in [LICENSE](LICENSE), with required attribution in [NOTICE](NOTICE).
+The components below retain their own copyright and license notices. Python
 dependencies installed separately through `requirements.txt` retain their own
 licenses.
 

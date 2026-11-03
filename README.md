@@ -103,7 +103,18 @@ as a device update procedure.
 
 ## Licensing
 
-No project-wide license has been selected for the original application code.
-Making a repository public does not itself grant an open-source license.
-Third-party components retain their own notices; see
+The original application code is available under the
+[PolyForm Noncommercial License 1.0.0](LICENSE). Anyone may use, modify, and share
+it for purposes permitted by that license, including noncommercial use. The
+license also expressly permits personal research without anticipated commercial
+application and use by educational institutions, public research organizations,
+and the other organizations listed in its Noncommercial Organizations section.
+Commercial purposes outside those permissions require separate permission from
+the copyright holder.
+
+When sharing the software, include the license terms or their URL and preserve
+the required attribution in [NOTICE](NOTICE). The software is provided without
+warranty. This is source-available software with noncommercial restrictions.
+
+Third-party components retain their own licenses and notices; see
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

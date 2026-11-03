@@ -24,8 +24,11 @@ The repository excludes `env/`, recordings in `data/` and `Files/`, logs,
 credentials, caches, and local settings. `.gitignore` does not remove any files
 from the Pi, and it does not protect a file that someone explicitly force-adds.
 The current private-LAN sensor addresses and serial device paths remain in the
-source. No license has been assigned to the original application; choose one
-separately if the intention is to permit reuse as open-source software.
+source. The original application is available under PolyForm Noncommercial
+1.0.0 in `LICENSE`, with required attribution in `NOTICE`. These terms restrict
+commercial use and include explicit permissions for the organizations listed in
+the license. Include these files and preserve the third-party notices when
+uploading or redistributing the source.
 
 ## 2. Initial commit and upload use maintainer credentials
 

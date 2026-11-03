@@ -223,7 +223,11 @@ unauthenticated HTTPS for public repositories, or a dedicated repository-scoped
 read-only deploy key for private repositories. Keep private keys in the user's
 `.ssh` directory outside this repository, and do not grant device write access.
 The website updater is deferred; do not add automatic pulls or deployment actions
-unless that work is requested. No project-wide license has been selected.
+unless that work is requested. The original application code is licensed under
+PolyForm Noncommercial 1.0.0; see `LICENSE` and the required attribution in
+`NOTICE`. Describe it as source-available with noncommercial restrictions.
+Preserve third-party licenses and copyright notices recorded in
+`THIRD_PARTY_NOTICES.md`; those components retain their own terms.
 
 ## Validation and future maintenance
 
