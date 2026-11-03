@@ -20,6 +20,7 @@ import collector
 
 from lib.auto_address import change_sensor_address
 from updater import Updater, UpdateError
+from device_config import save_sampling_interval
 
 
 app = Flask(__name__)
@@ -178,6 +179,7 @@ def set_interval():
         interval = float(data.get("interval", 1.0))
         # Enforce valid range server-side
         interval = max(1.0, min(60.0, interval))
+        save_sampling_interval(interval)
         collector.set_sampling_interval(interval)
         #app.logger.info(f"Sampling interval changed to {interval}s via web.")
         return jsonify({"status": "ok", "interval": interval})

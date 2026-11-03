@@ -12,7 +12,7 @@ import unittest
 from unittest import mock
 
 from updater import Updater, UpdateError
-from device_config import load_config
+from device_config import load_config, load_sampling_interval, save_sampling_interval
 
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -183,6 +183,22 @@ class UpdateTests(unittest.TestCase):
 
 
 class DeviceConfigurationTests(unittest.TestCase):
+    def test_sampling_interval_survives_reloading_settings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "operator-settings.json"
+            self.assertEqual(load_sampling_interval(path), 1.0)
+            save_sampling_interval(2.0, path)
+            self.assertEqual(load_sampling_interval(path), 2.0)
+            self.assertFalse(path.with_suffix(".tmp").exists())
+
+    def test_invalid_saved_interval_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "operator-settings.json"
+            for value in (0, 61, float("nan"), float("inf"), True, "2"):
+                with self.assertRaises(ValueError):
+                    save_sampling_interval(value, path)
+                self.assertFalse(path.exists())
+
     def test_overrides_preserve_unspecified_defaults(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "config.local.json"
@@ -285,6 +301,20 @@ class UpdateRouteTests(unittest.TestCase):
         response = self.client.post("/update", json={}, headers=self.headers)
         self.assertEqual(response.status_code, 503)
         self.assertEqual(self.controller.status()["status"], "failed")
+
+    def test_interval_is_saved_before_changing_the_running_collector(self):
+        self.collector.set_sampling_interval = mock.Mock()
+        with mock.patch.object(self.module, "save_sampling_interval") as save:
+            response = self.client.post("/set_interval", json={"interval": 2})
+            self.assertEqual(response.status_code, 200)
+            save.assert_called_once_with(2.0)
+        self.collector.set_sampling_interval.assert_called_once_with(2.0)
+
+    def test_failed_settings_save_keeps_previous_interval(self):
+        self.collector.set_sampling_interval = mock.Mock()
+        with mock.patch.object(self.module, "save_sampling_interval", side_effect=OSError("disk full")):
+            self.assertEqual(self.client.post("/set_interval", json={"interval": 2}).status_code, 400)
+        self.collector.set_sampling_interval.assert_not_called()
 
 
 if __name__ == "__main__":

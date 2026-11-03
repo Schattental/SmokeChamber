@@ -8,7 +8,7 @@ import shutil
 
 from lib import DFRobot_MultiGasSensor as dfg
 from lib.MHZ16_CO2 import MHZ16_CO2
-from device_config import load_config
+from device_config import load_config, load_sampling_interval
 
 import math
 
@@ -33,7 +33,7 @@ collecting = False    # True when running
 current_csv = None    # Active CSV file name
 lock = threading.Lock()
 last_emit_time = 0  # UNIX timestamp of last successful data emit
-sampling_interval = 1.0
+sampling_interval = load_sampling_interval()
 
 # history: list of dicts {"time": ..., "sensors": {...}}
 history = [] # last 100 points kept here

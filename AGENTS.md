@@ -247,6 +247,8 @@ must have both its flag cleared and all background sensor tasks finished before
 an update or service restart. The updater rechecks this before stopping the app.
 Its state/backups live under ignored `.updates/`; device settings stay in
 ignored `config.local.json`. See `docs/UPDATES.md` for bootstrap service setup.
+The website persists the sampling interval in ignored
+`.updates/operator-settings.json`; `collector.py` loads it at startup.
 Maintainer credentials may be retained during explicitly authorized development
 sessions, separately from credential-free website fetches.
 

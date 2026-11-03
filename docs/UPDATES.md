@@ -45,6 +45,10 @@ The gas-bank I²C mapping remains in `collector.py` and `lib/auto_address.py`.
 Do not change those mappings casually: they must agree with the physical DIP
 switches and the dashboard guide.
 
+The operator's sampling interval is saved in ignored
+`.updates/operator-settings.json` when changed through the website. It is loaded
+at startup so updates and service restarts retain the selected interval.
+
 Recordings in `data/`, logs, `Files/`, `env/`, and local configuration are not
 part of a source update. Candidate commits that try to track device-local files
 or introduce symlinks/submodules are rejected. Ignored local files that would
