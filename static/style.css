@@ -86,7 +86,8 @@ body::after {
 .container::before {
   content: "";
   position: absolute;
-  inset: -30%;
+  /* Keep the decorative layer from extending the page's scroll area. */
+  inset: 0;
   background: var(--spray);
   filter: blur(14px);
   opacity: .55;
