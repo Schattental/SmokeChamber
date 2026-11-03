@@ -1,0 +1,50 @@
+# Device-local Python environments and generated files
+/env/
+/.venv/
+/venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+
+# Experimental data and logs stay on the device, outside source control.
+/data/*
+!/data/.gitkeep
+/logs/*
+!/logs/.gitkeep
+/Files/
+/log.txt
+*.csv
+*.log
+*.log.*
+
+# Local settings, credentials, and future updater work areas
+.env
+.env.*
+!.env.example
+config.local.*
+/local/
+/.ssh/
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+*_deploy_key*
+/backups/
+/releases/
+/.updates/
+
+# Editor and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db

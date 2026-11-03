@@ -1,0 +1,11 @@
+# Direct runtime dependencies pinned to the existing Pi's installed versions.
+# This is not a complete transitive lockfile. Install only during a planned setup.
+Flask==3.1.2
+Flask-SocketIO==5.6.1
+gevent==25.9.1
+gevent-websocket==0.10.1
+requests==2.32.5
+pyserial==3.5
+smbus==1.1.post2
+spidev==3.8
+RPi.GPIO==0.7.1

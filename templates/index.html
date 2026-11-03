@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Smoke Chamber V2</title>
+    <!-- Load CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <!-- Load Chart.js -->
+    <script src="{{ url_for('static', filename='chart.js') }}"></script>
+    <!-- Load socket.io.min.js -->
+	<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+</head>
+
+<body>
+		<!-- Sidebar -->
+	<div id="sidebar" class="sidebar">
+		<button id="sidebarToggle" class="sidebar-toggle">☰</button>
+		<div class="sidebar-content">
+			<div class="sidebar-inner">
+				<h2>Menu</h2>
+				<button id="themeToggleSidebar" onclick="toggleTheme()" data-tooltip="Toggle themes.">Dark Mode</button>
+				<button onclick="downloadDev()" data-tooltip="Download the current system files (index, style, app and collector) as a ZIP.">Dev Download</button>
+				<button id="rebootBtn" data-tooltip="Reboot the Raspberry Pi fully.">Reboot</button>
+				<button id="restartBtn" data-tooltip="Restart the smoke chamber service (no full reboot).">Restart Service</button>
+				<button id="logToggleBtn" onclick="toggleLogPanel()" data-tooltip="Toggle log panel. Logs are always recorded. This panel is just visual.">Show Live Log</button>
+
+				<hr class="menu-separator">
+
+				<div class="menu-section">
+					<h3>Change Gas Sensor Bank</h3>
+
+					<select id="sensorSelect">
+						<option value="o2">O₂</option>
+						<option value="no2">NO₂</option>
+						<option value="so2">SO₂</option>
+						<option value="o3">O₃</option>
+						<option value="co">CO</option>
+					</select>
+
+					<select id="bankSelect">
+						<option value="bank1">Bank 1</option>
+						<option value="bank2">Bank 2</option>
+					</select>
+
+					<button onclick="applySensorGroup()">Apply</button>
+
+					<div id="sensorChangeStatus" class="status-text"></div>
+				</div>
+
+				<div class="dip-guide">
+					<h4>DIP Switch Guide</h4>
+
+					<div class="dip-row">
+						<strong>Bank 1</strong>
+						<div>O₂ / NO₂ / SO₂ / O₃ → 0x74–0x77 (Group 6)</div>
+						<div>CO → 0x70 (Group 5)</div>
+					</div>
+
+					<div class="dip-row">
+						<strong>Bank 2</strong>
+						<div>O₂ / NO₂ / SO₂ / O₃ → 0x60–0x63 (Group 1)</div>
+						<div>CO → 0x64 (Group 2)</div>
+					</div>
+
+					<div class="dip-legend">
+						<div><strong>A0 A1 Offsets:</strong></div>
+						<div>00 → CO & O₂</div>
+						<div>01 → NO₂</div>
+						<div>10 → SO₂</div>
+						<div>11 → O₃</div>
+					</div>
+				</div>
+
+			</div>
+		</div>
+	</div>
+
+    <div class="container">
+        <h1>Smoke Chamber Control Dashboard</h1>
+
+        <!-- Main Controls -->
+        <div class="controls">
+	     <!-- <button id="themeToggle" onclick="toggleTheme()">Dark Mode</button> -->
+            <button onclick="startData()" data-tooltip="Begin collecting sensor data and writing to CSV.">Start Collection</button>
+            <button onclick="stopData()" data-tooltip="Stop the current data collection.">Stop Collection</button>
+
+			<label for="intervalInput">Sampling Interval (s):</label>
+			<input
+			type="number"
+			id="intervalInput"
+			min="1"
+			max="60"
+			step="1"
+			oninput="clampIntervalValue(this)"
+			>
+			<button onclick="setIntervalServer()" data-tooltip="Time interval is only an approximation. Overhead is ~1s. E.g. 1s interval + 1s overhead = total of ~2s.">Apply</button>
+
+            <button onclick="downloadCSV()" data-tooltip="Download the most recent CSV file.">Download CSV</button>
+			<select id="zipRange">
+					<option value="all">All files</option>
+					<option value="7days">Last 7 days</option>
+					<option value="24h">Last 24 hours</option>
+			</select>
+			<button onclick="downloadZip()" data-tooltip="Download archived data files as a ZIP.">Download ZIP</button>
+			<!-- <button onclick="downloadDev()">Dev Download</button> -->
+            <span id="statusIndicator" class="status stopped">Stopped</span>
+        </div>
+
+        <!-- MAIN CHART (dynamic) -->
+	<div class="sensor-tabs">
+  		<button class="tab-btn active" onclick="switchBank('bank1', this)">Bank 1</button>
+		<button class="tab-btn" onclick="switchBank('bank2', this)">Bank 2</button>
+	</div>
+
+	<div id="sensorContainer"></div>
+	</div> <!-- close .container -->
+
+	<div id="logPanel" class="log-panel hidden">
+	<h3>Live Log</h3>
+	<div id="logViewer"></div>
+	</div>
+
+    <script>
+		// METADATA
+		// METADATA: defines how each sensor is displayed (label, unit, color)
+		const sensorMeta = {
+			// --- Core O₂ + internal board ---
+			o2: { label: "O₂", unit: "%Vol", color: "#a1f4fc" },
+			no2: { label: "NO₂", unit: "ppm", color: "#ca0000" },
+			so2: { label: "SO₂", unit: "ppm", color: "#c7b800" },
+			o3: { label: "O₃", unit: "ppm", color: "#ca0000" },
+			co:  { label: "CO",  unit: "ppm", color: "#983100" },
+			temperature: { label: "Temp (O₂ Sensor)", unit: "°C", color: "#ff7b00" },
+
+			// --- PurpleAir Environmental ---
+			temperature_c: { label: "Ambient Temp", unit: "°C", color: "#ff9800" },
+			temperature_f: { label: "Ambient Temp", unit: "°F", color: "#ff9800" },
+			current_humidity: { label: "Humidity", unit: "%", color: "#0099ff" },
+			pressure_hpa: { label: "Pressure", unit: "hPa", color: "#6666ff" },
+			pressure_pa: { label: "Pressure", unit: "Pa", color: "#6666ff" },
+
+			// --- PM (mass concentrations, µg/m³) ---
+			pm1_0_atm:   { label: "PM1.0", unit: "µg/m³", color: "#8e24aa" },
+			pm1_0_atm_b: { label: "PM1.0", unit: "µg/m³", color: "#ff5555" },
+			pm2_5_atm:   { label: "PM2.5", unit: "µg/m³", color: "#981cf8" },
+			pm2_5_atm_b: { label: "PM2.5", unit: "µg/m³", color: "#ff5555" },
+			pm10_0_atm:  { label: "PM10",  unit: "µg/m³", color: "#ab47bc" },
+			pm10_0_atm_b:{ label: "PM10",  unit: "µg/m³", color: "#ff5555" },
+
+			// --- Particle counts (particles/deciliter) ---
+			p_0_3_um:   { label: "≥0.3 µm", unit: "particles/dL", color: "#22c55e" },
+			p_0_3_um_b: { label: "≥0.3 µm", unit: "particles/dL", color: "#ff5555" },
+			p_0_5_um:   { label: "≥0.5 µm", unit: "particles/dL", color: "#4caf50" },
+			p_0_5_um_b: { label: "≥0.5 µm", unit: "particles/dL", color: "#ff5555" },
+			p_1_0_um:   { label: "≥1.0 µm", unit: "particles/dL", color: "#8bc34a" },
+			p_1_0_um_b: { label: "≥1.0 µm", unit: "particles/dL", color: "#ff5555" },
+			p_2_5_um:   { label: "≥2.5 µm", unit: "particles/dL", color: "#cddc39" },
+			p_2_5_um_b: { label: "≥2.5 µm", unit: "particles/dL", color: "#ff5555" },
+			p_5_0_um:   { label: "≥5.0 µm", unit: "particles/dL", color: "#ffc107" },
+			p_5_0_um_b: { label: "≥5.0 µm", unit: "particles/dL", color: "#ff5555" },
+			p_10_0_um:  { label: "≥10 µm",  unit: "particles/dL", color: "#ff9800" },
+			p_10_0_um_b:{ label: "≥10 µm",  unit: "particles/dL", color: "#ff5555" },
+
+			// --- Legacy placeholders for consistency ---
+			co2: { label: "CO₂", unit: "ppm", color: "#22c55e" },
+		};
+
+
+        const statusIndicator = document.getElementById('statusIndicator');
+
+        // ------------------------------
+        // Control functions
+        // ------------------------------
+        async function startData() {
+            await fetch('/start', { method: 'POST' });
+            updateStatus();
+        }
+
+        async function stopData() {
+            await fetch('/stop', { method: 'POST' });
+            updateStatus();
+        }
+
+        async function downloadCSV() {
+            window.location.href = '/download';
+        }
+	
+		async function downloadZip() {
+				const range = document.getElementById("zipRange").value;
+				window.location.href = `/zipdata?range=${range}`;
+		}
+
+		async function downloadDev() {
+			window.location.href = '/download_dev'
+		}
+
+		let activeBank = "bank1";
+
+		function switchBank(bank, btn) {
+			activeBank = bank;
+			document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+			if (btn) btn.classList.add("active");
+
+			document.querySelectorAll(".sensor-block").forEach(block => {
+				block.style.display = (block.dataset.bank === activeBank) ? "" : "none";
+			});
+		}
+
+
+		function applySensorGroup() {
+			const sensor = document.getElementById("sensorSelect").value;
+			const bank   = document.getElementById("bankSelect").value;
+
+			fetch("/change_sensor_group", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ sensor: sensor, bank: bank })
+			})
+			.then(res => res.json())
+			.then(data => {
+				document.getElementById("sensorChangeStatus").innerText = data.message;
+			})
+			.catch(() => {
+				document.getElementById("sensorChangeStatus").innerText = "Error";
+			});
+		}
+
+        // ------------------------------
+        // Periodic updates
+        // ------------------------------
+
+        async function updateStatus() {
+            const res = await fetch('/status');
+            const state = await res.json();
+            if (state.running) {
+                statusIndicator.textContent = 'Running';
+                statusIndicator.className = 'status running';
+            } else {
+                statusIndicator.textContent = 'Stopped';
+                statusIndicator.className = 'status stopped';
+            }
+			// --- Update interval display ---
+			if (state.interval !== undefined) {
+				const input = document.getElementById("intervalInput");
+				if (input) input.value = Number(state.interval).toFixed(1);
+			}
+        }
+
+		function toggleTheme() {
+			const body = document.body;
+			body.classList.toggle('dark-mode');
+
+			// Update the text of whichever toggle button exists
+			const btn = document.getElementById('themeToggleSidebar');
+			if (body.classList.contains('dark-mode')) {
+				btn.textContent = 'Light Mode';
+			} else {
+				btn.textContent = 'Dark Mode';
+			}
+
+			// Save preference
+			localStorage.setItem('darkMode', body.classList.contains('dark-mode'));
+		}
+
+		// Apply saved preference on load
+		window.addEventListener('DOMContentLoaded', () => {
+			const savedMode = localStorage.getItem('darkMode');
+			const body = document.body;
+			const btn = document.getElementById('themeToggleSidebar');
+
+			if (savedMode === 'true') {
+				body.classList.add('dark-mode');
+				if (btn) btn.textContent = 'Light Mode';
+			} else {
+				body.classList.remove('dark-mode');
+				if (btn) btn.textContent = 'Dark Mode';
+			}
+			updateStatus();
+		});
+
+	
+		// ------------------------------
+		// Real-time updates via WebSocket
+		// ------------------------------
+		// const socket = io();
+		const socket = io({
+			transports: ["polling", "websocket"],
+			upgrade: true,
+			rememberUpgrade: true,
+		});
+
+		socket.on("connect", () => {
+			console.log(
+				"connected",
+				socket.id,
+				"transport:",
+				socket.io.engine.transport.name
+			);
+		});
+
+		socket.io.engine.on("upgrade", () => {
+			console.log("UPGRADED transport:", socket.io.engine.transport.name);
+		});
+
+		socket.on("disconnect", (r) => {
+			console.log("disconnect:", r, "transport:", socket.io.engine.transport?.name);
+		});
+
+		const charts = {};  // holds all Chart.js instances
+
+		function createSensorUI(bank, sensorName, color, unit) {
+			const container = document.getElementById("sensorContainer");
+
+			const baseName = sensorName.endsWith("_b") ? sensorName.slice(0, -2) : sensorName;
+			const domKey = `${bank}_${baseName}`;
+			const chartKey = `${bank}:${baseName}`;
+
+			const isPurpleAir = /(pm\d|p_)/.test(baseName);
+
+			// If chart already exists for this bank+base, add dataset (Ch B)
+			if (charts[chartKey]) {
+				const chart = charts[chartKey];
+				const meta = sensorMeta[baseName] || {};
+				const label = isPurpleAir
+				? (sensorName.endsWith("_b")
+					? `${meta.label || baseName} (Ch B)`
+					: `${meta.label || baseName} (Ch A)`)
+				: `${meta.label || baseName}`;
+
+				// Dataset A is index 0, dataset B is index 1
+				const datasetIndex = sensorName.endsWith("_b") ? 1 : 0;
+
+				if (!chart.data.datasets[datasetIndex]) {
+				chart.data.datasets[datasetIndex] = {
+					label,
+					data: [],
+					borderColor: sensorName.endsWith("_b") ? "#ff5555" : (color || "#007bff"),
+					borderWidth: 2,
+					tension: 0.2,
+					pointRadius: 2
+				};
+				chart.update();
+				}
+				return;
+			}
+
+			// --- Create new chart UI block ---
+			const block = document.createElement("div");
+			block.className = "sensor-block";
+			block.dataset.bank = bank;
+			if (bank !== activeBank) block.style.display = "none";
+
+			const chartDiv = document.createElement("div");
+			chartDiv.className = "chart-container";
+
+			const canvas = document.createElement("canvas");
+			canvas.id = `chart_${domKey}`;
+			chartDiv.appendChild(canvas);
+
+			const stats = document.createElement("div");
+			stats.className = "chart-stats";
+			stats.id = `stats_${domKey}`;
+			stats.innerHTML = `
+				<span class="stat" id="avg_${domKey}">Avg: --</span>
+				<span class="stat" id="min_${domKey}">Min: --</span>
+				<span class="stat" id="max_${domKey}">Max: --</span>
+			`;
+			chartDiv.appendChild(stats);
+
+			const widget = document.createElement("div");
+			widget.className = "sensor-widget";
+			widget.id = `widget_${domKey}`;
+			widget.innerHTML = `
+				<h2>${sensorMeta[baseName]?.label || baseName}</h2>
+				<p class="current-value" id="value_${domKey}">--</p>
+				<p class="unit">${unit || ""}</p>
+			`;
+
+			block.appendChild(chartDiv);
+			block.appendChild(widget);
+			container.appendChild(block);
+
+			const ctx = canvas.getContext("2d");
+			const meta = sensorMeta[baseName] || {};
+			const label = isPurpleAir ? `${meta.label || baseName} (Ch A)` : `${meta.label || baseName}`;
+
+			charts[chartKey] = new Chart(ctx, {
+				type: "line",
+				data: {
+				labels: [],
+				datasets: [{
+					label,
+					data: [],
+					borderColor: color || "#007bff",
+					borderWidth: 2,
+					tension: 0.2,
+					pointRadius: 2
+				}]
+				},
+				options: {
+				animation: false,
+				scales: {
+					x: { title: { display: true, text: "Time" } },
+					y: { title: { display: true, text: "Value" } }
+				}
+				}
+			});
+		}
+
+
+		// ------------------------------
+		// Receive all existing points after connecting
+		// ------------------------------
+		socket.on("init_data", (history) => {
+			console.log("Received initial data:", history);
+
+			for (const point of history) {
+				if (!point.banks) continue;
+
+				for (const [bank, sensors] of Object.entries(point.banks)) {
+				for (const [name, value] of Object.entries(sensors)) {
+					const baseName = name.endsWith("_b") ? name.slice(0, -2) : name;
+					const meta = sensorMeta[baseName] || {};
+					const chartKey = `${bank}:${baseName}`;
+					const domKey = `${bank}_${baseName}`;
+
+					// Create UI if needed
+					if (!charts[chartKey]) {
+					createSensorUI(bank, name, meta.color, meta.unit);
+					} else {
+					// ensure dataset exists if this is _b
+					if (name.endsWith("_b")) createSensorUI(bank, name, meta.color, meta.unit);
+					}
+
+					const chart = charts[chartKey];
+					const datasetIndex = name.endsWith("_b") ? 1 : 0;
+
+					// Ensure dataset exists (A or B)
+					if (!chart.data.datasets[datasetIndex]) {
+					const label = /(pm\d|p_)/.test(baseName)
+						? (name.endsWith("_b")
+							? `${meta.label || baseName} (Ch B)`
+							: `${meta.label || baseName} (Ch A)`)
+						: `${meta.label || baseName}`;
+					chart.data.datasets[datasetIndex] = {
+						label,
+						data: [],
+						borderColor: name.endsWith("_b") ? "#ff5555" : (meta.color || "#007bff"),
+						borderWidth: 2,
+						tension: 0.2,
+						pointRadius: 2
+					};
+					}
+
+					// Add label once
+					const lastLabel = chart.data.labels[chart.data.labels.length - 1];
+					if (lastLabel !== point.time) chart.data.labels.push(point.time);
+
+					chart.data.datasets[datasetIndex].data.push(value);
+
+					// Update widget
+					const valElem = document.getElementById(`value_${domKey}`);
+					if (valElem) valElem.textContent = (value?.toFixed?.(2) ?? "--");
+				}
+				}
+			}
+
+			for (const chart of Object.values(charts)) chart.update();
+		});
+
+
+		// ------------------------------
+		// Listen for new data messages
+		// ------------------------------
+		socket.on("new_data", (data) => {
+			console.log("NEW_DATA", data);
+			if (!data || !data.banks) {
+				console.log("new_data missing banks");
+				return;
+			}
+			const time = data.time;
+			const banks = data.banks;
+			if (!banks) return;
+
+			for (const [bank, sensors] of Object.entries(banks)) {
+				for (const [name, value] of Object.entries(sensors)) {
+				const baseName = name.endsWith("_b") ? name.slice(0, -2) : name;
+				const meta = sensorMeta[baseName] || {};
+				const chartKey = `${bank}:${baseName}`;
+				const domKey = `${bank}_${baseName}`;
+
+				// Create chart if needed
+				if (!charts[chartKey]) {
+					createSensorUI(bank, name, meta.color, meta.unit);
+				} else {
+					if (name.endsWith("_b")) createSensorUI(bank, name, meta.color, meta.unit);
+				}
+
+				const chart = charts[chartKey];
+				const datasetIndex = name.endsWith("_b") ? 1 : 0;
+
+				// Ensure dataset exists
+				if (!chart.data.datasets[datasetIndex]) {
+					const label = /(pm\d|p_)/.test(baseName)
+					? (name.endsWith("_b")
+						? `${meta.label || baseName} (Ch B)`
+						: `${meta.label || baseName} (Ch A)`)
+					: `${meta.label || baseName}`;
+					chart.data.datasets[datasetIndex] = {
+					label,
+					data: [],
+					borderColor: name.endsWith("_b") ? "#ff5555" : (meta.color || "#007bff"),
+					borderWidth: 2,
+					tension: 0.2,
+					pointRadius: 2
+					};
+				}
+
+				// Add new label if timestamp changed
+				const lastLabel = chart.data.labels[chart.data.labels.length - 1];
+				if (lastLabel !== time) {
+					chart.data.labels.push(time);
+
+					if (chart.data.labels.length > 100) {
+					chart.data.labels.shift();
+					for (const ds of chart.data.datasets) {
+						if (ds) ds.data.shift();
+					}
+					}
+				}
+
+				chart.data.datasets[datasetIndex].data.push(value);
+
+				chart.update();
+
+				// Update stats (per chart)
+				const allValues = chart.data.datasets
+					.filter(ds => ds)
+					.flatMap(ds => ds.data.filter(v => !isNaN(v)));
+
+				if (allValues.length > 0) {
+					const avg = allValues.reduce((a, b) => a + b, 0) / allValues.length;
+					const min = Math.min(...allValues);
+					const max = Math.max(...allValues);
+
+					const a = document.getElementById(`avg_${domKey}`);
+					const mn = document.getElementById(`min_${domKey}`);
+					const mx = document.getElementById(`max_${domKey}`);
+					if (a) a.textContent = `Avg: ${avg.toFixed(2)}`;
+					if (mn) mn.textContent = `Min: ${min.toFixed(2)}`;
+					if (mx) mx.textContent = `Max: ${max.toFixed(2)}`;
+				}
+
+				// Update live widget value
+				const valElem = document.getElementById(`value_${domKey}`);
+				if (valElem) valElem.textContent = (value?.toFixed?.(2) ?? "--");
+				}
+			}
+		});
+
+
+		socket.on("status_update", (state) => {
+			if (state.running) {
+			statusIndicator.textContent = 'Running';
+			statusIndicator.className = 'status running';
+			} else {
+			statusIndicator.textContent = 'Stopped';
+			statusIndicator.className = 'status stopped';
+			}
+		});
+
+		// ------------------------------
+		// Sidebar toggle logic
+		// ------------------------------
+		const sidebar = document.getElementById("sidebar");
+		const sidebarToggle = document.getElementById("sidebarToggle");
+
+		if (sidebar && sidebarToggle) {
+			sidebarToggle.addEventListener("click", () => {
+				sidebar.classList.toggle("expanded");
+			});
+		}
+
+		// ------------------------------
+		// Service Restart Button
+		// ------------------------------
+		document.getElementById("restartBtn").addEventListener("click", async () => {
+			try {
+				// Check if collection is running first
+				const statusRes = await fetch("/status");
+				const state = await statusRes.json();
+
+				if (state.running) {
+					alert("Cannot restart service while data collection is running. Please stop collection first.");
+					return;
+				}
+
+				// Proceed to restart safely
+				const res = await fetch("/restart", { method: "POST" });
+				const data = await res.json();
+				if (data.status === "restarting") {
+					alert("Restarting service... The page will reload when it's back online.");
+					
+					// Poll until server is back, then reload
+					const started = Date.now();
+					const wait = (ms) => new Promise(r => setTimeout(r, ms));
+					while (true) {
+						await wait(1500);
+						try {
+							const ping = await fetch("/status", { cache: "no-store" });
+							if (ping.ok) {
+								location.reload();
+								break;
+							}
+						} catch (e) {
+							if (Date.now() - started > 60000) {
+								alert("The service is taking longer than expected to restart. Please reload manually.");
+								break;
+							}
+						}
+					}
+				} else {
+					alert("Error restarting service: " + (data.reason || data.status));
+				}
+			} catch (err) {
+				alert("Failed to contact server: " + err);
+			}
+		});
+
+		// ------------------------------
+		// RPi Reboot Button
+		// ------------------------------
+		document.getElementById("rebootBtn").addEventListener("click", async () => {
+			// Confirm with the user first
+			const confirmReboot = confirm("⚠️ Are you sure you want to reboot the Raspberry Pi?\n\nAll active connections will be lost.");
+			if (!confirmReboot) return;
+
+			try {
+				// Check if data collection is running
+				const statusRes = await fetch("/status");
+				const state = await statusRes.json();
+
+				if (state.running) {
+					alert("Cannot reboot while data collection is running. Please stop collection first.");
+					return;
+				}
+
+				// Send reboot request
+				const res = await fetch("/reboot", { method: "POST" });
+				const data = await res.json();
+
+				if (data.status === "rebooting") {
+					alert("Rebooting Raspberry Pi now… The page will reconnect when it’s back online.");
+
+					// Poll until server is reachable again
+					const started = Date.now();
+					const wait = (ms) => new Promise(r => setTimeout(r, ms));
+					while (true) {
+						await wait(2000);
+						try {
+							const ping = await fetch("/status", { cache: "no-store" });
+							if (ping.ok) {
+								location.reload();
+								break;
+							}
+						} catch (e) {
+							if (Date.now() - started > 120000) {
+								alert("The Pi is taking longer than expected to reboot. Please reload manually.");
+								break;
+							}
+						}
+					}
+				} else {
+					alert("Reboot failed: " + (data.reason || data.status));
+				}
+			} catch (err) {
+				alert("Failed to contact server: " + err);
+			}
+		});
+
+		// ------------------------------
+		// Live Log Viewer
+		// ------------------------------
+		const logPanel  = document.getElementById("logPanel");
+		const logViewer = document.getElementById("logViewer");
+		const logToggleBtn = document.getElementById("logToggleBtn");
+
+		// The element that actually scrolls:
+		const logScrollEl = logPanel;  // <-- key change
+
+		let autoScrollEnabled = true;
+
+		logScrollEl.addEventListener("scroll", () => {
+			const scrollBottom = logScrollEl.scrollHeight - logScrollEl.scrollTop - logScrollEl.clientHeight;
+			autoScrollEnabled = scrollBottom < 100;
+		});
+
+		// Receive new log lines via WebSocket
+		socket.on("log_update", (data) => {
+			const line = data.line?.trim?.() ?? "";
+			if (!line) return;
+
+			const div = document.createElement("div");
+			div.textContent = line;
+			div.className = "log-line";
+
+			// Apply color coding by keywords
+			if (/\bERROR\b/i.test(line)) div.classList.add("error");
+			else if (/\bWARN(ING)?\b/i.test(line)) div.classList.add("warn");
+			else if (/\bINFO\b/i.test(line)) div.classList.add("info");
+			else if (/\bDEBUG\b/i.test(line)) div.classList.add("debug");
+			else if (/\bCRITICAL\b/i.test(line)) div.classList.add("critical");
+
+			logViewer.appendChild(div);
+
+			if (autoScrollEnabled) {
+				requestAnimationFrame(() => {
+					logScrollEl.scrollTop = logScrollEl.scrollHeight;
+				});
+			}
+		});
+
+
+		// Load initial log history
+		async function loadRecentLog() {
+			const res = await fetch("/log", { cache: "no-store" });
+			const data = await res.json();
+			logViewer.innerHTML = "";
+
+			data.lines.forEach(line => {
+				const div = document.createElement("div");
+				div.textContent = line;
+				div.className = "log-line";
+
+				// Reuse same coloring logic as for live updates
+				if (/\bERROR\b/i.test(line)) div.classList.add("error");
+				else if (/\bWARN(ING)?\b/i.test(line)) div.classList.add("warn");
+				else if (/\bINFO\b/i.test(line)) div.classList.add("info");
+				else if (/\bDEBUG\b/i.test(line)) div.classList.add("debug");
+				else if (/\bCRITICAL\b/i.test(line)) div.classList.add("critical");
+
+				logViewer.appendChild(div);
+			});
+
+			logScrollEl.scrollTop = logScrollEl.scrollHeight;
+		}
+
+
+		// Show/hide log panel
+		function toggleLogPanel() {
+			const isHidden = logPanel.classList.toggle("hidden");
+			logToggleBtn.textContent = isHidden ? "Show Live Log" : "Hide Live Log";
+			if (!isHidden) {
+				loadRecentLog();
+				autoScrollEnabled = true;
+			}
+		}
+
+		// ------------------------------
+		// Sampling Interval
+		// ------------------------------
+
+		function clampIntervalValue(input) {
+			const min = parseFloat(input.min);
+			const max = parseFloat(input.max);
+			let val = parseFloat(input.value);
+
+			// Prevent invalid or empty input
+			if (isNaN(val)) {
+				input.value = min;
+				return;
+			}
+
+			// Clamp to bounds
+			if (val < min) input.value = min;
+			if (val > max) input.value = max;
+		}
+
+		async function setIntervalServer() {
+			const input = document.getElementById("intervalInput");
+			clampIntervalValue(input);
+			const interval = parseFloat(input.value);
+
+			// --- check current collector status ---
+			let running = false;
+			try {
+				const res = await fetch("/status", { cache: "no-store" });
+				const state = await res.json();
+				running = state.running;
+			} catch (e) {
+				console.warn("Failed to fetch collector status:", e);
+			}
+
+			if (running) {
+				const confirmChange = confirm(
+					"Data collection is currently running.\n\nChanging the sampling interval will take affect immediately.\n\nDo you want to proceed?"
+				);
+				if (!confirmChange) return; // user cancelled
+			}
+
+			// --- apply the change ---
+			try {
+				const res = await fetch("/set_interval", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ interval }),
+				});
+				const data = await res.json();
+
+				if (data.status === "ok") {
+					// Just reflect the value in the existing input
+					if (input) input.value = Number(data.interval).toFixed(1);
+					alert(`Sampling interval set to ${data.interval} seconds.`);
+				} else {
+					alert("Failed to change interval: " + (data.message || "Unknown error"));
+				}
+			} catch (err) {
+				alert("Failed to contact server: " + err);
+			}
+		}
+
+    </script>
+</body>
+</html>
+

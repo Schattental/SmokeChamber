@@ -1,0 +1,15 @@
+# Reference copy of the existing Pi service. Not installed automatically.
+[Unit]
+Description=Smoke Chamber Data Collection Web App
+After=network.target
+
+[Service]
+User=smoke
+WorkingDirectory=/home/smoke/smokechamber
+ExecStart=/home/smoke/smokechamber/env/bin/python /home/smoke/smokechamber/app.py
+Restart=always
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
