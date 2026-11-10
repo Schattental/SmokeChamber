@@ -75,18 +75,17 @@ history = [] # last 100 points kept here
 
 # --- PurpleAir endpoints (one per bank) ---
 _device_config = load_config()
-PURPLEAIR_1_JSON_URL = _device_config["purpleair_urls"]["bank1"]
-PURPLEAIR_2_JSON_URL = _device_config["purpleair_urls"]["bank2"]
+PURPLEAIR_JSON_URLS = _device_config["purpleair_urls"]
 
 # PurpleAir sensors refresh their reported values every 10 seconds.
 # Match that cadence to avoid redundant HTTP requests.
 PURPLEAIR_CACHE_SECONDS = 10
 PURPLEAIR_MAX_AGE_SECONDS = 60
 
-# independent caches (one per bank)
+# Independent caches for both gas banks and the PurpleAir-only control group.
 _purpleair_cache = {
-    "bank1": {"data": None, "time": 0, "next_attempt": 0, "stale_warned": False},
-    "bank2": {"data": None, "time": 0, "next_attempt": 0, "stale_warned": False},
+    bank: {"data": None, "time": 0, "next_attempt": 0, "stale_warned": False}
+    for bank in PURPLEAIR_JSON_URLS
 }
 
 # --- PurpleAir enable/disable per bank (temporary dev/testing switch) ---
@@ -349,6 +348,11 @@ SENSOR_BANKS = {
     },
 }
 
+# Append only PurpleAir fields, preserving the existing banks' CSV column order.
+SENSOR_BANKS["control"] = {
+    name: dict(SENSOR_BANKS["bank1"][name]) for name in PURPLEAIR_FIELDS
+}
+
 
 FORMAT_PRECISION = {
     "temperature": 2,
@@ -507,7 +511,7 @@ def start_collecting():
             for bank_name, bank_sensors in SENSOR_BANKS.items():
                 # PurpleAir per bank
                 if PURPLEAIR_ENABLED.get(bank_name, True):
-                    pa_url = PURPLEAIR_1_JSON_URL if bank_name == "bank1" else PURPLEAIR_2_JSON_URL
+                    pa_url = PURPLEAIR_JSON_URLS[bank_name]
                     purpleair_data = read_purpleair(bank_name, pa_url)
                 else:
                     purpleair_data = {k: float("nan") for k in PURPLEAIR_FIELDS}

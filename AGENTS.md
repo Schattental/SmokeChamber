@@ -3,8 +3,9 @@
 ## Purpose and scope
 
 This Raspberry Pi 5 hosts a local website for a fruit fly smoke chamber
-experiment. It reads two banks of gas sensors and two PurpleAir air quality
-devices, records measurements to CSV, and presents live readings and charts.
+experiment. It reads two banks of gas sensors and three PurpleAir air quality
+devices (Bank 1, Bank 2, and a PurpleAir-only Control group), records measurements
+to CSV, and presents live readings and charts.
 Preserve experimental data and measurement meaning when making changes.
 
 Project root: `/home/smoke/smokechamber`. The parent home directory is the
@@ -70,6 +71,7 @@ documented in the inspected project; do not assume them.
 | `tests/test_updater.py` | Temporary-repository update/rollback tests plus mocked route and configuration tests. |
 | `tests/test_collector_watchdog.py` | Mocked initialization, cancellation, progress timeout, single-collector restart, and CSV regression tests. |
 | `tests/test_purpleair.py` | Mocked PurpleAir attempt spacing, cache expiry, recovery, and missing CSV/live readings. |
+| `tests/test_control_recording.py` | Control-only fields, original CSV header compatibility, endpoint routing, and third-tab regressions. |
 
 The stack is Python, Flask, Flask-SocketIO, gevent, Jinja, plain browser JS/CSS,
 and Chart.js. There is no frontend build step or database. Repository preparation
@@ -100,8 +102,9 @@ Default PurpleAir local JSON URLs in `device_config.py`, used by `collector.py`:
 
 - Bank 1: `http://192.168.0.104/json?live=true`.
 - Bank 2: `http://192.168.0.109/json?live=true`.
+- Control: `http://192.168.0.101/json?live=true` (permanent address).
 
-Both are enabled by default. This Pi's URLs, enable flags, and CO₂ serial paths
+All three are enabled by default. This Pi's URLs, enable flags, and CO₂ serial paths
 are preserved in ignored `config.local.json`. `collector.py` reads these via
 `device_config.load_config()`; a tracked example documents the format.
 PurpleAir requests wait at least 10 seconds after each completed attempt per bank,
@@ -110,7 +113,8 @@ for up to 60 seconds after receipt. Older readings become blank CSV cells and
 JSON nulls, with one expiry warning per outage; attempts continue on the same
 10-second schedule and successful responses restore readings automatically.
 Elapsed times use a monotonic clock. A faster collection interval does not imply
-fresh PurpleAir measurements each row.
+fresh PurpleAir measurements each row. Control has its own independent cache and
+no I²C/UART sensors; never include it in gas sensor address changes.
 
 PurpleAir supplies A/B channels for PM1.0, PM2.5, PM10 (`µg/m³`) and particle
 counts at ≥0.3/0.5/1.0/2.5/5.0/10 µm (`particles/dL`, as labeled in this code).
@@ -147,15 +151,18 @@ Live/history point shape:
 {"time": "14:03:21", "banks": {"bank1": {"o2": 20.9}, "bank2": {"o2": 20.8}}}
 ```
 
-This example omits other fields. Each configured bank has 30 fields. Server
+This example omits other fields. Each gas bank has 30 fields; `banks.control`
+has the 23 PurpleAir fields only. Server
 history keeps the latest 100 points and is not cleared on a new session. It is
 process memory, not a reload of archived CSVs. Socket.IO events are `init_data`
 (history sent to the connecting client), `new_data`, `status_update` (running
 flag), and `log_update` (`line`). PurpleAir `_b` fields are channel B of the
 same bank, not a separate bank; browser charts combine A and B datasets.
 
-CSV starts with `timestamp`, then all bank 1 fields, then all bank 2 fields in
-`SENSOR_BANKS` insertion order. Headers use `bank_sensor (unit)`. Rows and live
+CSV starts with `timestamp`, then all bank 1 fields, then all bank 2 fields, then
+all Control fields in `SENSOR_BANKS` insertion order (84 columns total).
+Control headers start with `control_`, for example `control_pm2_5_atm (µg/m³)`;
+the original Bank 1/2 columns retain their order. Headers use `bank_sensor (unit)`. Rows and live
 points use host-local `HH:MM:SS`; filenames carry the host-local session start
 date/time. There is no timezone offset or full date in each row. Preserve this
 contract unless explicitly changing it, and do not infer the host timezone from
@@ -289,7 +296,7 @@ PY
 ```
 
 This checks syntax only. For behavioral tests, isolate or mock hardware modules
-before imports and use temporary CSV paths. For UI changes, inspect both bank
+before imports and use temporary CSV paths. For UI changes, inspect all three
 tabs, A/B channel alignment, missing readings, reconnect/history behavior,
 status, and light/dark modes as relevant to the change. The UI currently depends
 on external Socket.IO CDN JS and Google Fonts despite having local chart assets.

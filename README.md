@@ -1,7 +1,7 @@
 # Smoke Chamber
 
 Local web dashboard and sensor recorder for a Raspberry Pi 5 fruit fly smoke
-chamber experiment. The Pi reads two gas-sensor banks and two PurpleAir devices,
+chamber experiment. The Pi reads two gas-sensor banks and three PurpleAir devices,
 writes timestamped CSV sessions, and displays live charts in a browser.
 
 ## What is included
@@ -26,7 +26,7 @@ dependencies, replace the installed service, or restart collection.
 
 The configured server listens on port 5000. Open `http://<PI_ADDRESS>:5000/`
 from the chamber's local network. It provides collection start/stop, a 1–60
-second sampling interval, two bank tabs, CSV/ZIP downloads, and a live log.
+second sampling interval, Bank 1 / Bank 2 / Control tabs, CSV/ZIP downloads, and a live log.
 Sampling includes hardware/network overhead. The website also exposes hardware
 address changes, service restart, and Pi reboot controls. It currently has no
 authentication; keep its deployment on the intended local network.
@@ -36,6 +36,11 @@ authentication; keep its deployment on the intended local network.
 Each bank has O₂, NO₂, SO₂, O₃, and CO on I²C bus 1, an MH-Z16 CO₂ sensor over
 UART, and a PurpleAir local HTTP JSON feed. Exact addresses, serial paths,
 units, timing, and data formats are documented in [AGENTS.md](AGENTS.md).
+The separate Control group contains only a third PurpleAir feed at
+`http://192.168.0.101/json?live=true`. Its CSV columns follow Bank 2 and start
+with `control_` (for example, `control_pm2_5_atm (µg/m³)`). It uses the same
+10-second request spacing and 60-second freshness limit as the other PurpleAir
+devices; unavailable or expired readings leave blank CSV cells.
 
 Device-local PurpleAir addresses, enable flags, and CO₂ UART paths are loaded
 from ignored `config.local.json`, with defaults in `device_config.py`. Copy

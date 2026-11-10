@@ -207,6 +207,33 @@ class DeviceConfigurationTests(unittest.TestCase):
             self.assertEqual(config["purpleair_urls"]["bank1"], "http://example.invalid/json")
             self.assertEqual(config["co2_uart_ports"]["bank1"], "/dev/ttyAMA0")
             self.assertTrue(config["purpleair_enabled"]["bank2"])
+            self.assertEqual(config["purpleair_urls"]["control"], "http://192.168.0.101/json?live=true")
+            self.assertTrue(config["purpleair_enabled"]["control"])
+
+    def test_control_can_be_configured_without_adding_uart_or_changing_banks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.local.json"
+            path.write_text(json.dumps({
+                "purpleair_urls": {"control": "http://control.invalid/json"},
+                "purpleair_enabled": {"control": False},
+            }))
+            config = load_config(path)
+            self.assertEqual(config["purpleair_urls"]["control"], "http://control.invalid/json")
+            self.assertFalse(config["purpleair_enabled"]["control"])
+            self.assertTrue(config["purpleair_enabled"]["bank1"])
+            self.assertTrue(config["purpleair_enabled"]["bank2"])
+            self.assertEqual(set(config["co2_uart_ports"]), {"bank1", "bank2"})
+
+    def test_control_is_not_a_uart_bank_and_unknown_groups_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.local.json"
+            for invalid in (
+                {"co2_uart_ports": {"control": "/dev/not-a-device"}},
+                {"purpleair_urls": {"bank3": "http://wrong.invalid/json"}},
+            ):
+                path.write_text(json.dumps(invalid))
+                with self.assertRaises(ValueError):
+                    load_config(path)
 
     def test_invalid_settings_fail_instead_of_silently_using_another_device(self):
         with tempfile.TemporaryDirectory() as directory:

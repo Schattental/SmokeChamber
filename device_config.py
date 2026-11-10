@@ -11,8 +11,9 @@ DEFAULTS = {
     "purpleair_urls": {
         "bank1": "http://192.168.0.104/json?live=true",
         "bank2": "http://192.168.0.109/json?live=true",
+        "control": "http://192.168.0.101/json?live=true",
     },
-    "purpleair_enabled": {"bank1": True, "bank2": True},
+    "purpleair_enabled": {"bank1": True, "bank2": True, "control": True},
     "co2_uart_ports": {
         "bank1": "/dev/ttyAMA0",
         "bank2": "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0",
@@ -27,7 +28,7 @@ def load_config(path=CONFIG_PATH):
         if not isinstance(overrides, dict) or set(overrides) - set(DEFAULTS):
             raise ValueError("Invalid device configuration sections")
         for section, values in overrides.items():
-            if not isinstance(values, dict) or set(values) - {"bank1", "bank2"}:
+            if not isinstance(values, dict) or set(values) - set(DEFAULTS[section]):
                 raise ValueError(f"Invalid {section} bank configuration")
             for bank, value in values.items():
                 if section == "purpleair_enabled":

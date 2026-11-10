@@ -13,7 +13,7 @@ import test_collector_watchdog
 class PurpleAirTests(unittest.TestCase):
     def setUp(self):
         test_collector_watchdog.CollectorWatchdogTests.setUp(self)
-        self.collector.PURPLEAIR_ENABLED = {"bank1": True, "bank2": True}
+        self.collector.PURPLEAIR_ENABLED = {"bank1": True, "bank2": True, "control": True}
         self.get = mock.Mock()
         self.collector.requests = types.SimpleNamespace(get=self.get)
         self.response = mock.Mock()
@@ -127,6 +127,44 @@ class PurpleAirTests(unittest.TestCase):
         self.assert_missing(self.read())
         self.get.assert_not_called()
         self.collector.logger.warning.assert_not_called()
+
+    def test_control_contains_only_purpleair_fields_after_the_existing_banks(self):
+        banks = self.collector.SENSOR_BANKS
+        self.assertEqual(list(banks), ["bank1", "bank2", "control"])
+        self.assertEqual(list(banks["control"]), self.collector.PURPLEAIR_FIELDS)
+        self.assertEqual(len(banks["bank1"]), 30)
+        self.assertEqual(len(banks["bank2"]), 30)
+        self.assertEqual(len(banks["control"]), 23)
+        for field, info in banks["control"].items():
+            self.assertIsNone(info["generator"])
+            self.assertEqual(info["unit"], banks["bank1"][field]["unit"])
+            self.assertIsNot(info, banks["bank1"][field])
+
+    def test_control_retries_expires_and_recovers_independently(self):
+        first = self.read("control")
+        self.get.side_effect = TimeoutError("control unavailable")
+        self.clock.sleep(10)
+        self.assertIs(self.read("control"), first)
+        self.clock.sleep(2)
+        self.assertIs(self.read("control"), first)
+        self.assertEqual(self.get.call_count, 2)
+        self.clock.sleep(49)
+        self.assert_missing(self.read("control"))
+        self.assertEqual(self.get.call_count, 3)
+        self.assertEqual(len(self.expiry_warnings()), 1)
+        self.assertEqual(self.expiry_warnings()[0].args[1], "control")
+        for bank in ("bank1", "bank2"):
+            self.assertIsNone(self.collector._purpleair_cache[bank]["data"])
+            self.assertEqual(self.collector._purpleair_cache[bank]["next_attempt"], 0)
+        self.get.side_effect = None
+        self.response.json.return_value = {"pm2_5_atm": 42}
+        self.clock.sleep(10)
+        self.assertEqual(self.read("control")["pm2_5_atm"], 42)
+
+    def test_disabled_control_does_not_request(self):
+        self.collector.PURPLEAIR_ENABLED["control"] = False
+        self.assert_missing(self.read("control"))
+        self.get.assert_not_called()
 
     def test_expired_values_are_blank_in_csv_and_null_in_live_data(self):
         collector = self.collector
