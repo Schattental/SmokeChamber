@@ -75,20 +75,21 @@ class PurpleAirTests(unittest.TestCase):
     def test_expiry_is_checked_during_cooldown_and_warns_once(self):
         first = self.read()
         self.get.side_effect = TimeoutError("connection timed out")
-        self.clock.sleep(60)
+        self.clock.sleep(self.collector.PURPLEAIR_MAX_AGE_SECONDS)
         self.assertIs(self.read(), first)
         self.clock.sleep(0.01)
         self.assert_missing(self.read())
         self.assertEqual(self.get.call_count, 2)
         self.assertEqual(len(self.expiry_warnings()), 1)
-        self.clock.now = self.started + 70
+        self.clock.now = (self.started + self.collector.PURPLEAIR_MAX_AGE_SECONDS
+                          + self.collector.PURPLEAIR_CACHE_SECONDS)
         self.assert_missing(self.read())
         self.assertEqual(self.get.call_count, 3)
         self.assertEqual(len(self.expiry_warnings()), 1)
 
     def test_timeout_crossing_age_limit_does_not_return_expired_data(self):
         self.read()
-        self.clock.sleep(59)
+        self.clock.sleep(self.collector.PURPLEAIR_MAX_AGE_SECONDS - 1)
         def timeout(*args, **kwargs):
             self.clock.sleep(3)
             raise TimeoutError("response timed out")

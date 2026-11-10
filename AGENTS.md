@@ -109,12 +109,17 @@ are preserved in ignored `config.local.json`. `collector.py` reads these via
 `device_config.load_config()`; a tracked example documents the format.
 PurpleAir requests wait at least 10 seconds after each completed attempt per bank,
 including failures; HTTP timeout is 3 seconds. Successful readings may be reused
-for up to 60 seconds after receipt. Older readings become blank CSV cells and
+for up to 15 seconds after receipt (`PURPLEAIR_MAX_AGE_SECONDS`), allowing a
+five-second buffer beyond the request interval. A failed refresh can briefly
+reuse the previous reading, and successive CSV rows can repeat cached values.
+Age is measured since the Pi received a successful response, rather than since
+the device took the measurement. Older readings become blank CSV cells and
 JSON nulls, with one expiry warning per outage; attempts continue on the same
 10-second schedule and successful responses restore readings automatically.
 Elapsed times use a monotonic clock. A faster collection interval does not imply
 fresh PurpleAir measurements each row. Control has its own independent cache and
 no I²C/UART sensors; never include it in gas sensor address changes.
+Changing the freshness constant requires an idle service restart to take effect.
 
 PurpleAir supplies A/B channels for PM1.0, PM2.5, PM10 (`µg/m³`) and particle
 counts at ≥0.3/0.5/1.0/2.5/5.0/10 µm (`particles/dL`, as labeled in this code).

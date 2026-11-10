@@ -38,9 +38,26 @@ UART, and a PurpleAir local HTTP JSON feed. Exact addresses, serial paths,
 units, timing, and data formats are documented in [AGENTS.md](AGENTS.md).
 The separate Control group contains only a third PurpleAir feed at
 `http://192.168.0.101/json?live=true`. Its CSV columns follow Bank 2 and start
-with `control_` (for example, `control_pm2_5_atm (µg/m³)`). It uses the same
-10-second request spacing and 60-second freshness limit as the other PurpleAir
-devices; unavailable or expired readings leave blank CSV cells.
+with `control_` (for example, `control_pm2_5_atm (µg/m³)`).
+
+All three PurpleAir devices use the same cache policy. Each device waits at
+least 10 seconds after a completed request before another attempt, including
+after failures. Between requests, the last successful reading may be reused for
+up to **15 seconds after the Pi receives it**. This allows a five-second buffer
+beyond the request interval; a failed refresh can briefly reuse the previous
+reading. Consequently, consecutive CSV rows can contain the same cached
+measurement. The age limit measures time since receipt, rather than the age of
+the measurement inside the PurpleAir sensor.
+
+Once that cached reading is older than 15 seconds, its fields become blank CSV
+cells and JSON `null` values in the live data. An expiry warning is logged once
+per outage. Requests continue with the same 10-second spacing as the collection
+loop permits, and successful responses automatically restore readings. Fields
+are also missing when no successful reading has been received yet.
+
+The limit is `PURPLEAIR_MAX_AGE_SECONDS` in `collector.py`; request spacing is
+`PURPLEAIR_CACHE_SECONDS`. Changes take effect after restarting the website
+service while collection is stopped.
 
 Device-local PurpleAir addresses, enable flags, and CO₂ UART paths are loaded
 from ignored `config.local.json`, with defaults in `device_config.py`. Copy

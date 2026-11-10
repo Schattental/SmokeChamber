@@ -80,7 +80,8 @@ PURPLEAIR_JSON_URLS = _device_config["purpleair_urls"]
 # PurpleAir sensors refresh their reported values every 10 seconds.
 # Match that cadence to avoid redundant HTTP requests.
 PURPLEAIR_CACHE_SECONDS = 10
-PURPLEAIR_MAX_AGE_SECONDS = 60
+# Maximum age since a successful response; allows a 5s buffer beyond requests.
+PURPLEAIR_MAX_AGE_SECONDS = 15
 
 # Independent caches for both gas banks and the PurpleAir-only control group.
 _purpleair_cache = {
@@ -195,7 +196,7 @@ def _cached_purpleair(bank_name, cache):
 
 
 def read_purpleair(bank_name: str, url: str):
-    """Limit attempts per bank and reuse successful readings for at most 60 seconds."""
+    """Limit attempts per bank and enforce the configured cache freshness limit."""
     if not PURPLEAIR_ENABLED.get(bank_name, True):
         return {k: float("nan") for k in PURPLEAIR_FIELDS}
 
